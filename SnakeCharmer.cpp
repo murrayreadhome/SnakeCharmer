@@ -851,6 +851,8 @@ ostream& operator<<(ostream& out, const Problem& p)
     return out;
 }
 
+class PlacementFail : public std::exception {};
+
 class SnakeCharmer 
 {
     size_t N;
@@ -885,6 +887,32 @@ public:
         return moves;
     }
 
+    void find_best_snake()
+    {
+        for (int v = maxV; v > (maxV+1)/2; v--)
+        {
+            find_runs(v);
+            for (size_t n = N - 1; n > 0; n--)
+            {
+                vector<pair<size_t, size_t>> meeting = best_meeting(n);
+                if (meeting.size() < n)
+                    n = meeting.size();
+                for (int c = 3; c >= 0; c--)
+                {
+                    try
+                    {
+                        initial_placement(meeting, c, v);
+                        connect_snake();
+                        score_and_record();
+                    }
+                    catch (PlacementFail)
+                    {
+                    }
+                }
+            }
+        }
+    }
+
     struct Run
     {
         size_t start;
@@ -892,8 +920,10 @@ public:
     };
     vector<Run> runs;
 
-    void findRuns(int x)
+    void find_runs(int v)
     {
+        runs.clear();
+
         size_t run_start = n;
         auto record_run = [&](size_t i) 
         { 
@@ -902,7 +932,7 @@ public:
 
         for (size_t i = 0; i < n; i++)
         {
-            if (snake[i] == x)
+            if (snake[i] == v)
             {
                 if (run_start == n)
                     run_start = i;
@@ -945,11 +975,12 @@ public:
             while (valid_runs.size() > n)
             {
                 // todo could attempt to bring large runs together
-                auto smallest = min_element(ALL(valid_runs), [](const Run& a, const Run& b)
+                // removing from the end, to free up more space, but does that really help? or just cost a little bit?
+                auto smallest = min_element(valid_runs.rbegin(), valid_runs.rend(), [](const Run& a, const Run& b)
                 {
                     return a.length < b.length;
                 });
-                valid_runs.erase(smallest);
+                valid_runs.erase((++smallest).base());
             }
 
             // todo improve scoring, size probably matters, but isn't everything
@@ -968,6 +999,170 @@ public:
         return best;
     }
 
+    Grid<size_t> placement;
+
+    struct Loop
+    {
+        size_t first;
+        size_t last;
+        vector<Pos> points;
+        bool end_free;
+        //Pos target;
+        size_t size() const { return 1 + last - first; }
+    };
+    vector<Loop> loops;
+
+    void initial_placement(const vector<pair<size_t, size_t>>& meeting, int cap_options, int v)
+    {
+        if (meeting.empty())
+            throw PlacementFail();
+
+        placement.init(N, N, n, 1);
+        loops.clear();
+
+        bool end_caps = cap_options & 1;
+        bool mid_caps = cap_options & 2;
+        size_t parity = meeting.front().first % 2;
+        size_t m = meeting.size();
+        size_t m2 = m / 2;
+
+        if (mid_caps && end_caps && (m % 2) == 1)
+            // don't want to think about double end caps now
+            throw PlacementFail();
+
+        Pos p(N / 2, N / 2);
+        size_t loop_end = n;
+        Pos loop_end_pos = p;
+        size_t meeting_idx = m - 1;
+
+        auto place_connection = [&](TDir d1, TDir d2)
+        {
+            const auto& connection = meeting[meeting_idx--];
+            if (!placement.isValid(p))
+                throw PlacementFail();
+            placement[p] = connection.second;
+            if (loop_end != n)
+            {
+                Loop loop = { connection.second, loop_end, {p, loop_end_pos}, false };
+                loops.push_back(loop);
+            }
+            p += KDir[d1];
+            if (!placement.isValid(p))
+                throw PlacementFail();
+            placement[p] = connection.first;
+            loop_end = connection.first;
+            loop_end_pos = p;
+            p += KDir[d2];
+        };
+
+        auto place_cap = [&](size_t cap, TDir dir)
+        {
+            if (cap != n)
+            {
+                placement[p] = cap;
+                if (loop_end != n)
+                {
+                    Loop loop = { cap, loop_end, {p, loop_end_pos}, false };
+                    loops.push_back(loop);
+                }
+                loop_end = cap;
+                loop_end_pos = p;
+            }
+            p += KDir[dir];
+        };
+
+        auto add_mid_caps = [&](TDir d1, TDir d2)
+        {
+            if (!placement.isValid(p))
+                throw PlacementFail();
+            size_t lower_end = meeting[meeting_idx].second;
+            size_t gap_start = lower_end + 1;
+            while (snake[gap_start] == v)
+                gap_start++;
+            size_t gap_end = loop_end - 1;
+            while (snake[gap_end] == v)
+                gap_end--;
+            size_t low_cap = find_between(gap_start, gap_end, v, parity);
+            size_t high_cap = find_between(low_cap == n ? gap_start : low_cap + 1, gap_end, v, 1 - parity);
+            place_cap(high_cap, d1);
+            place_cap(low_cap, d2);
+        };
+
+        if (end_caps)
+        {
+            size_t e_cap = find_between(meeting.back().second + 1, n - 1, v, parity);
+            place_cap(e_cap, ELeft);
+
+            for (size_t i = 0; i < m2; i++)
+                place_connection(ELeft, ELeft);
+
+            // odd middle goes vertical
+            if (m % 2 == 1)
+                place_connection(EUp, ERight);
+            else if (mid_caps)
+                add_mid_caps(EUp, ERight);
+            else
+                p = p + KDir[EUp] + KDir[ERight];
+
+            for (size_t i = 0; i < m2; i++)
+                place_connection(ERight, ERight);
+
+            size_t s_cap = find_between(0, meeting.front().first - 1, v, 1-parity);
+            place_cap(s_cap, ERight);
+        }
+        else
+        {
+            if (m < 3)
+                throw PlacementFail();
+
+            size_t m4 = m2 / 2;
+            for (size_t i = 0; i < m4; i++)
+                place_connection(ELeft, ELeft);
+
+            if (mid_caps && m % 2 == 0)
+                add_mid_caps(EUp, ERight);
+            else
+                place_connection(EUp, ERight);
+
+            for (size_t i = 0; i < m4; i++)
+                place_connection(ERight, ERight);
+
+            size_t mr = meeting_idx + 1;
+            m4 = mr / 2;
+            for (size_t i = 0; i < m4; i++)
+                place_connection(ERight, ERight);
+
+            if (mid_caps)
+                add_mid_caps(EDown, ELeft);
+            else if (m % 2 == 0)
+                place_connection(EDown, ELeft);
+            else
+                p = p + KDir[EDown] + KDir[ELeft];
+
+            for (size_t i = 0; i < m4; i++)
+                place_connection(ELeft, ELeft);
+        }
+
+        // add loop to start
+        Loop loop = { 0, loop_end, {loop_end_pos}, true };
+        loops.push_back(loop);
+    }
+
+    size_t find_between(size_t from, size_t to, int v, size_t parity)
+    {
+        for (size_t i = from; i <= to; i++)
+        {
+            if ((i % 2) == parity && snake[i] == v)
+                return i;
+        }
+        return n;
+    }
+
+    void connect_snake()
+    {}
+    
+    void score_and_record()
+    {}
 };
 
 vector<char> run(const Problem& p)
@@ -1027,13 +1222,31 @@ void runs(int argc, char** argv)
     SnakeCharmer prog;
     prog.findSolution(p.N, p.V, p.snake);
     cout << p;
-    prog.findRuns(p.V+1);
+    prog.find_runs(p.V+1);
     for (auto r : prog.runs)
         if (r.length > 1) cout << r.start << " " << r.length << endl;
     auto m = prog.best_meeting(p.N - 1);
     cout << m.size() << endl;
     for (auto p : m)
         cout << p.first << " " << p.second << endl;
+    for (int c = 3; c >= 0; c--)
+    {
+        try
+        {
+            prog.initial_placement(m, c, p.V + 1);
+            cout << prog.placement;
+            for (auto loop : prog.loops)
+            {
+                cout << loop.first << " " << loop.last << " " << loop.end_free;
+                for (Pos p : loop.points)
+                    cout << " " << p;
+                cout << endl;
+            }
+        }
+        catch (PlacementFail)
+        {
+        }
+    }
 }
 
 int main(int argc, char** argv) 
