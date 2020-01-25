@@ -1,1 +1,7 @@
 build
+/Debug
+/SnakeCharmer.vcxproj.user
+/SnakeCharmer.vcxproj.filters
+/SnakeCharmer.vcxproj
+/SnakeCharmer.sln
+/.vs/SnakeCharmer/v16
