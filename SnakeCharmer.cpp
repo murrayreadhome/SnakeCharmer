@@ -926,8 +926,9 @@ public:
                     n = meeting.size();
                 if (n == 0)
                     break;
-                for (int c = 3; c >= 0; c--)
+                for (int c = 4; c >= 0; c--)
                 {
+                    // cout << v << " " << n << " " << c << endl;
                     try
                     {
                         initial_placement(meeting, c, v);
@@ -936,6 +937,7 @@ public:
                     }
                     catch (PlacementFail)
                     {
+                    //    cout << "fail" << endl;
                     }
                 }
             }
@@ -1067,18 +1069,18 @@ public:
 
         bool end_caps = cap_options & 1;
         bool mid_caps = cap_options & 2;
+        bool odd_caps = cap_options & 4;
+        if (odd_caps)
+            end_caps = mid_caps = true;
         size_t parity = meeting.front().first % 2;
         size_t m = meeting.size();
         size_t m2 = m / 2;
-
-        if (mid_caps && end_caps && (m % 2) == 1)
-            // don't want to think about double end caps now
-            throw PlacementFail();
 
         Pos p(N / 2, N / 2);
         size_t loop_end = n;
         Pos loop_end_pos = p;
         size_t meeting_idx = m - 1;
+        bool ignore_next_loop = false;
 
         auto place_connection = [&](TDir d1, TDir d2)
         {
@@ -1086,11 +1088,12 @@ public:
             if (!placement.isValid(p))
                 throw PlacementFail();
             placement[p] = connection.second;
-            if (loop_end != n)
+            if (loop_end != n && !ignore_next_loop)
             {
                 Loop loop = { loops.size(), connection.second, loop_end, {p, loop_end_pos}, false };
                 loops.push_back(loop);
             }
+            ignore_next_loop = false;
             p += KDir[d1];
             if (!placement.isValid(p))
                 throw PlacementFail();
@@ -1133,6 +1136,11 @@ public:
             place_cap(low_cap, d2);
         };
 
+        auto odd_cap_connection = [&](TDir d1, TDir d2)
+        {
+
+        };
+
         if (end_caps)
         {
             size_t e_cap = find_between(meeting.back().second + 1, n - 1, v, parity);
@@ -1143,7 +1151,12 @@ public:
 
             // odd middle goes vertical
             if (m % 2 == 1)
-                place_connection(EUp, ERight);
+            {
+                if (odd_caps)
+                    odd_cap_connection(EUp, ERight);
+                else
+                    place_connection(EUp, ERight);
+            }
             else if (mid_caps)
                 add_mid_caps(EUp, ERight);
             else
@@ -1167,7 +1180,12 @@ public:
             if (mid_caps && m % 2 == 0)
                 add_mid_caps(EUp, ERight);
             else
-                place_connection(EUp, ERight);
+            {
+                if (odd_caps)
+                    odd_cap_connection(ERight, EUp);
+                else
+                    place_connection(EUp, ERight);
+            }
 
             for (size_t i = 0; i < m4; i++)
                 place_connection(ERight, ERight);
@@ -1180,7 +1198,12 @@ public:
             if (mid_caps)
                 add_mid_caps(EDown, ELeft);
             else if (m % 2 == 0)
-                place_connection(EDown, ELeft);
+            {
+                if (odd_caps)
+                    odd_cap_connection(EDown, ELeft);
+                else
+                    place_connection(EDown, ELeft);
+            }
             else
                 p = p + KDir[EDown] + KDir[ELeft];
 
