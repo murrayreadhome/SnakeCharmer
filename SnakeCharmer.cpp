@@ -980,7 +980,10 @@ public:
                 {
                     return a.length < b.length;
                 });
-                valid_runs.erase((++smallest).base());
+                if (smallest->length > 2)
+                    valid_runs.resize(n);
+                else
+                    valid_runs.erase((++smallest).base());
             }
 
             // todo improve scoring, size probably matters, but isn't everything
@@ -1001,6 +1004,12 @@ public:
 
     Grid<size_t> placement;
 
+    struct Growth
+    {
+        size_t where;
+        vector<Pos> add;
+    };
+
     struct Loop
     {
         size_t first;
@@ -1009,6 +1018,9 @@ public:
         bool end_free;
         //Pos target;
         size_t size() const { return 1 + last - first; }
+        bool complete() const { return size() == points.size(); }
+        Grid<double> pressure;
+        vector<Growth> growth;
     };
     vector<Loop> loops;
 
@@ -1159,8 +1171,88 @@ public:
     }
 
     void connect_snake()
+    {
+        connect_cap_misses();
+        do
+        {
+            analyse_loops();
+            if (grow_single_options())
+                continue;
+            grow_highest_pressure();
+        } while (!all_loops_done());
+        place_loop_numbers();
+    }
+
+    void connect_cap_misses()
+    {
+        for (Loop& loop : loops)
+        {
+            if (loop.points.size() == 2 &&
+                loop.points[0].boxDist(loop.points[1]) == 2)
+            {
+                Pos p(loop.points[0].x, loop.points[1].y);
+                if (placement[p] != n)
+                    p = Pos(loop.points[1].x, loop.points[0].y);
+                if (placement[p] != n)
+                    report("should not have a 2 gap");
+                placement[p]=0;
+                loop.points.insert(loop.points.begin()+1, p);
+            }
+        }
+    }
+
+    void analyse_loops()
+    {
+        for (Loop& loop : loops)
+        {
+            loop.growth.clear();
+            if (loop.complete())
+                continue;
+            loop.pressure.init(N,N,0);
+            
+            // find growth points
+            for (size_t i=1; i<loop.points.size(); i++)
+            {
+                const Pos& a = loop.points[i-1];
+                const Pos& b = loop.points[i];
+                if (a.boxDist(b) != 1)
+                    report("don't expect disconnected loops yet");
+                int grow[2] = {EUp, EDown};
+                if (a.y == b.y)
+                {
+                    grow[0] = ELeft;
+                    grow[1] = ERight;
+                }
+
+                for (int g=0; g<2; g++)
+                {
+                    Pos ga = a + KDir[grow[g]];
+                    Pos gb = b + KDir[grow[g]];
+                    if (!placement.isValid(ga) || !placement.isValid(gb))
+                        continue;
+                    if (placement[a]==n && placement[b]==n)
+                    {
+                        loop.growth.push_back({i,{ga,gb}});
+                    }
+                }
+            }
+
+            // todo pressure map
+        }
+    }
+    
+    bool grow_single_options()
     {}
     
+    void grow_highest_pressure()
+    {}
+    
+    bool all_loops_done()
+    {}
+    
+    void place_loop_numbers()
+    {}
+
     void score_and_record()
     {}
 };
