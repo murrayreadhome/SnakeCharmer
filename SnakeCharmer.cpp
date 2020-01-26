@@ -851,7 +851,12 @@ ostream& operator<<(ostream& out, const Problem& p)
     return out;
 }
 
-class PlacementFail : public std::exception {};
+class PlacementFail : public std::exception 
+{
+public:
+    size_t id;
+    PlacementFail(size_t id=0) : id(id) {}
+};
 
 class SnakeCharmer 
 {
@@ -1012,14 +1017,17 @@ public:
 
     struct Loop
     {
+        size_t id;
         size_t first;
         size_t last;
         vector<Pos> points;
-        bool end_free;
+        bool start_free;
         //Pos target;
         size_t size() const { return 1 + last - first; }
+        size_t remaining() const { return size() - points.size(); }
         bool complete() const { return size() == points.size(); }
         Grid<double> pressure;
+        Grid<int> visited;
         vector<Growth> growth;
     };
     vector<Loop> loops;
@@ -1055,7 +1063,7 @@ public:
             placement[p] = connection.second;
             if (loop_end != n)
             {
-                Loop loop = { connection.second, loop_end, {p, loop_end_pos}, false };
+                Loop loop = { loops.size(), connection.second, loop_end, {p, loop_end_pos}, false };
                 loops.push_back(loop);
             }
             p += KDir[d1];
@@ -1074,7 +1082,7 @@ public:
                 placement[p] = cap;
                 if (loop_end != n)
                 {
-                    Loop loop = { cap, loop_end, {p, loop_end_pos}, false };
+                    Loop loop = { loops.size(), cap, loop_end, {p, loop_end_pos}, false };
                     loops.push_back(loop);
                 }
                 loop_end = cap;
@@ -1156,7 +1164,7 @@ public:
         }
 
         // add loop to start
-        Loop loop = { 0, loop_end, {loop_end_pos}, true };
+        Loop loop = { loops.size(), 0, loop_end, {loop_end_pos}, true };
         loops.push_back(loop);
     }
 
@@ -1195,7 +1203,7 @@ public:
                     p = Pos(loop.points[1].x, loop.points[0].y);
                 if (placement[p] != n)
                     report("should not have a 2 gap");
-                placement[p]=0;
+                placement[p]=loop.id;
                 loop.points.insert(loop.points.begin()+1, p);
             }
         }
@@ -1211,14 +1219,14 @@ public:
             loop.pressure.init(N,N,0);
             
             // find growth points
-            for (size_t i=1; i<loop.points.size(); i++)
+            for (size_t i=1; loop.remaining() >= 2 && i<loop.points.size(); i++)
             {
                 const Pos& a = loop.points[i-1];
                 const Pos& b = loop.points[i];
                 if (a.boxDist(b) != 1)
                     report("don't expect disconnected loops yet");
                 int grow[2] = {EUp, EDown};
-                if (a.y == b.y)
+                if (a.x == b.x)
                 {
                     grow[0] = ELeft;
                     grow[1] = ERight;
@@ -1230,25 +1238,207 @@ public:
                     Pos gb = b + KDir[grow[g]];
                     if (!placement.isValid(ga) || !placement.isValid(gb))
                         continue;
-                    if (placement[a]==n && placement[b]==n)
-                    {
-                        loop.growth.push_back({i,{ga,gb}});
-                    }
+                    if (placement[ga]==n && placement[gb]==n)
+                        loop.growth.push_back({i, {ga, gb}});
                 }
             }
 
-            // todo pressure map
+            if (loop.start_free && (loop.remaining()%2 == 1 || loop.growth.empty()))
+            {
+                const Pos& a = loop.points.front();
+                for (int d = 0; d < 4; d++)
+                {
+                    Pos ga = a + KDir[d];
+                    if (!placement.isValid(ga))
+                        continue;
+                    if (placement[ga] == n)
+                        loop.growth.push_back({0, {ga}});
+                }
+            }
+
+            // pressure map
+            double remaining = loop.remaining();
+            vector<Pos> now, next;
+            if (loop.visited.width == 0)
+                loop.visited.init(N, N, 0);
+            static int visit_id = 0;
+            visit_id++;
+            for (const Growth& growth : loop.growth)
+            {
+                for (const Pos& p : growth.add)
+                {
+                    if (loop.visited[p] != visit_id)
+                        now.push_back(p);
+                    loop.visited[p] = visit_id;
+                    loop.pressure[p] = remaining;
+                }
+            }
+            remaining -= double(now.size()) * 0.5;
+            double pf = 1.0;
+            while (remaining > 0 && !now.empty())
+            {
+                next.clear();
+                for (const Pos& p : now)
+                {
+                    for (int d = 0; d < 4; d++)
+                    {
+                        Pos q = p + KDir[d];
+                        if (!loop.visited.isValid(q))
+                            continue;
+                        if (loop.visited[q] == visit_id)
+                            continue;
+                        if (placement[q] != n)
+                            continue;
+                        next.push_back(q);
+                        loop.visited[q] = visit_id;
+                        loop.pressure[q] = remaining*pf;
+                    }
+                }
+                now.swap(next);
+                remaining -= double(now.size()) * 0.7;
+                pf *= 0.9;
+            }
         }
     }
     
     bool grow_single_options()
-    {}
+    {
+        bool single_found = false;
+        for (Loop& loop : loops)
+        {
+            if (loop.growth.size() != 1)
+                continue;
+            single_found = true;
+            const Growth& growth = loop.growth[0];
+            for (const Pos& p : growth.add)
+                if (placement[p] != n)
+                    throw PlacementFail(loop.id);
+            cout << "single grow " << loop.id << endl;
+            for (const Pos& p : growth.add)
+                placement[p] = loop.id;
+            loop.points.insert(loop.points.begin() + growth.where, growth.add.begin(), growth.add.end());
+        }
+        return single_found;
+    }
     
+    enum CheckResult { Ok, Stop, Undo };
+
     void grow_highest_pressure()
-    {}
-    
+    {
+        Grid<double> pressure(N, N, 0);
+        for (Loop& loop : loops)
+        {
+            if (loop.complete())
+                continue;
+            FOR_GRID(p, pressure)
+                pressure[p] += loop.pressure[p];
+        }
+        cout << pressure;
+
+        // todo find highest pressure loop?
+        size_t max_r = 0;
+        size_t l = 0;
+        for (size_t i=0; i<loops.size(); i++)
+        {
+            const Loop& loop = loops[i];
+            size_t r = loop.remaining();
+            if (r > max_r)
+            {
+                max_r = r;
+                l = i;
+            }
+        }
+
+//        Loop& loop = loops[l];
+        bool something_added = false;
+        for (Loop& loop : loops)
+        {
+            if (loop.complete())
+                continue;
+            bool any_found = false;
+            Growth best_growth;
+            double lowest_pressure = 1e99;
+            for (const Growth& growth : loop.growth)
+            {
+                bool ok = true;
+                double gp = 0;
+                for (const Pos& p : growth.add)
+                {
+                    if (placement[p] != n)
+                        ok = false;
+                    gp += pressure[p];
+                }
+                if (!ok)
+                    continue;
+                any_found = true;
+                if (gp < lowest_pressure)
+                {
+                    best_growth = growth;
+                    lowest_pressure = gp;
+                }
+            }
+            if (lowest_pressure < 1e99)
+            {
+                cout << "pressure grow " << loop.id << " " << best_growth.add[0] << endl;
+                for (const Pos& p : best_growth.add)
+                    placement[p] = loop.id;
+                CheckResult check = check_growth(loop.id);
+                if (check == Undo)
+                {
+                    for (const Pos& p : best_growth.add)
+                        placement[p] = n;
+                }
+                else
+                {
+                    something_added = true;
+                    loop.points.insert(loop.points.begin() + best_growth.where, best_growth.add.begin(), best_growth.add.end());
+                    if (check == Stop)
+                        break;
+                }
+            }
+            if (!any_found)
+                throw PlacementFail(loop.id);
+        }
+        if (!something_added)
+            throw PlacementFail(-1);
+    }
+
+    CheckResult check_growth(size_t after_loop_id)
+    {
+        CheckResult result = Ok;
+        for (const Loop& loop : loops)
+        {
+            if (loop.id <= after_loop_id)
+                continue;
+            if (loop.complete())
+                continue;
+            size_t g_count = 0;
+            for (const Growth& growth : loop.growth)
+            {
+                bool ok = true;
+                for (const Pos& p : growth.add)
+                {
+                    if (placement[p] != n)
+                        ok = false;
+                }
+                if (ok)
+                    g_count++;
+            }
+            if (g_count == 0)
+                return Undo;
+            if (g_count == 1)
+                result = Stop;
+        }
+        return result;
+    }
+
     bool all_loops_done()
-    {}
+    {
+        for (Loop& loop : loops)
+            if (!loop.complete())
+                return false;
+        return true;
+    }
     
     void place_loop_numbers()
     {}
@@ -1326,17 +1516,29 @@ void runs(int argc, char** argv)
         try
         {
             prog.initial_placement(m, c, p.V + 1);
-            cout << prog.placement;
-            for (auto loop : prog.loops)
-            {
-                cout << loop.first << " " << loop.last << " " << loop.end_free;
-                for (Pos p : loop.points)
-                    cout << " " << p;
-                cout << endl;
-            }
+            prog.connect_snake();
+            cout << "success" << endl;
         }
-        catch (PlacementFail)
+        catch (PlacementFail f)
         {
+            cout << "fail " << f.id << endl;
+        }
+        Grid<char> dg(p.N, p.N, ' ');
+        string ids = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        FOR_GRID(q, dg)
+        {
+            size_t x = prog.placement[q];
+            if (x == p.N * p.N) continue;
+            if (x < 50) dg[q] = ids[x];
+            else dg[q] = '#';
+        }
+        cout << dg;
+        for (auto loop : prog.loops)
+        {
+            cout << ids[loop.id] << loop.id << " "  << loop.first << " " << loop.last << " " << (loop.complete() ? "Y" : "n") << " " << loop.start_free;
+            for (Pos p : loop.points)
+                cout << " " << p;
+            cout << endl;
         }
     }
 }
