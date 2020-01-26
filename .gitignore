@@ -4,3 +4,9 @@ SnakeCharmer.code-workspace
 .vscode/c_cpp_properties.json
 tester.jar
 SnakeCharmerVis.java
+/Debug
+/SnakeCharmer.vcxproj.user
+/SnakeCharmer.vcxproj.filters
+/SnakeCharmer.vcxproj
+/SnakeCharmer.sln
+/.vs/SnakeCharmer/v16
