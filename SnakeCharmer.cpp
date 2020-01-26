@@ -27,11 +27,11 @@ using namespace std;
 #define TIME_LIMIT 100000
 #define MIN_STEPS 0
 #else
-#define TIME_LIMIT 9000
+#define TIME_LIMIT 8000
 #define MIN_STEPS 0
 #endif
 #else
-#define TIME_LIMIT 9000
+#define TIME_LIMIT 8000
 #define MIN_STEPS 0
 #endif
 
@@ -803,7 +803,7 @@ struct Problem
             snake[i] = '0' + uniform_int_distribution<int>(2,V+1)(re);
     }
 
-    int score_chars(const vector<char> path) const
+    int score_chars(const vector<char>& path, bool print_grid = false) const
     {
         Pos p(N / 2, N / 2);
         static Grid<int> g;
@@ -830,6 +830,9 @@ struct Problem
                     prod *= cell;
             score += prod;
         }
+
+        if (print_grid)
+            cout << g;
 
         return score;
     }
@@ -864,32 +867,49 @@ class SnakeCharmer
     int maxV;
     vector<int> snake;
     size_t n;
+    Problem problem;
 
 public:
     vector<char> findSolution(int aN, int aV, string aSnake)
-    {                     
+    {
+        milliseconds();
+
+        init(aN, aV, aSnake);
+        simple_solution();
+        find_best_snake();
+        
+        return best_path;
+    }
+
+    void init(int aN, int aV, string aSnake)
+    {
+        problem = Problem{ aN, aV, aSnake };
         N = aN;
         maxV = aV + 1;
         snake.reserve(aSnake.size());
         for (char c : aSnake)
             snake.push_back(c - '0');
         n = snake.size();
+    }
 
-        char names[] = {'L','D','R','U'};    
+    void simple_solution()
+    {
+        char names[] = { 'L','D','R','U' };
 
-        int n=int(N*N-1);
+        int n = int(N * N - 1);
         vector<char> moves(n);
-        
-        for (int i=0,dir=0,L=1; i<n; )
+
+        for (int i = 0, dir = 0, L = 1; i < n; )
         {
-            for (int k=0; k<L && i<n; k++,i++) moves[i]=names[dir];
-            dir=(dir+1)%4;
-            for (int k=0; k<L && i<n; k++,i++) moves[i]=names[dir];
-            dir=(dir+1)%4;
+            for (int k = 0; k < L && i < n; k++, i++) moves[i] = names[dir];
+            dir = (dir + 1) % 4;
+            for (int k = 0; k < L && i < n; k++, i++) moves[i] = names[dir];
+            dir = (dir + 1) % 4;
             L++;
         }
-        
-        return moves;
+
+        best_path = moves;
+        best_score = problem.score_chars(moves);
     }
 
     void find_best_snake()
@@ -899,9 +919,13 @@ public:
             find_runs(v);
             for (size_t n = N - 1; n > 0; n--)
             {
+                if (milliseconds() > TIME_LIMIT)
+                    break;
                 vector<pair<size_t, size_t>> meeting = best_meeting(n);
                 if (meeting.size() < n)
                     n = meeting.size();
+                if (n == 0)
+                    break;
                 for (int c = 3; c >= 0; c--)
                 {
                     try
@@ -1022,6 +1046,7 @@ public:
         size_t last;
         vector<Pos> points;
         bool start_free;
+        bool single_growth;
         //Pos target;
         size_t size() const { return 1 + last - first; }
         size_t remaining() const { return size() - points.size(); }
@@ -1209,52 +1234,98 @@ public:
         }
     }
 
+    void add_loop_growth_points(Loop& loop)
+    {
+        // find growth points
+        for (size_t i = 1; loop.remaining() >= 2 && i < loop.points.size(); i++)
+        {
+            const Pos& a = loop.points[i - 1];
+            const Pos& b = loop.points[i];
+            if (a.boxDist(b) != 1)
+                report("don't expect disconnected loops yet");
+            int grow[2] = { EUp, EDown };
+            if (a.x == b.x)
+            {
+                grow[0] = ELeft;
+                grow[1] = ERight;
+            }
+
+            for (int g = 0; g < 2; g++)
+            {
+                Pos ga = a + KDir[grow[g]];
+                Pos gb = b + KDir[grow[g]];
+                if (!placement.isValid(ga) || !placement.isValid(gb))
+                    continue;
+                if (placement[ga] == n && placement[gb] == n)
+                    loop.growth.push_back({ i, {ga, gb} });
+            }
+        }
+
+        if (loop.start_free && (loop.remaining() % 2 == 1 || loop.growth.empty()))
+        {
+            const Pos& a = loop.points.front();
+            for (int d = 0; d < 4; d++)
+            {
+                Pos ga = a + KDir[d];
+                if (!placement.isValid(ga))
+                    continue;
+                if (placement[ga] == n)
+                {
+                    loop.growth.clear();
+                    loop.growth.push_back({ 0, {ga} });
+                }
+            }
+        }
+    }
+
+    bool test_loop_growth_trouble(Loop loop)
+    {
+        if (loop.growth.size() <= 1)
+            return true;
+        vector<Pos> temp_added;
+        bool trouble = false;
+        while (!trouble && loop.remaining() > 2)
+        {
+            for (const Growth& growth : loop.growth)
+            {
+                if (loop.remaining() <= 2)
+                    break;
+                if (growth_ok(growth))
+                {
+                    add_growth(loop, growth);
+                    for (const Pos& p : growth.add)
+                        temp_added.push_back(p);
+                    for (Growth& later : loop.growth)
+                    {
+                        if (later.where <= growth.where)
+                            continue;
+                        later.where += growth.add.size();
+                    }
+                }
+            }
+            loop.growth.clear();
+            add_loop_growth_points(loop);
+            if (loop.growth.size() <= 1)
+                trouble = true;
+        }
+        for (const Pos& p : temp_added)
+            placement[p] = n;
+
+        return trouble;
+    }
+
     void analyse_loops()
     {
         for (Loop& loop : loops)
         {
             loop.growth.clear();
+            loop.single_growth = false;
             if (loop.complete())
                 continue;
             loop.pressure.init(N,N,0);
-            
-            // find growth points
-            for (size_t i=1; loop.remaining() >= 2 && i<loop.points.size(); i++)
-            {
-                const Pos& a = loop.points[i-1];
-                const Pos& b = loop.points[i];
-                if (a.boxDist(b) != 1)
-                    report("don't expect disconnected loops yet");
-                int grow[2] = {EUp, EDown};
-                if (a.x == b.x)
-                {
-                    grow[0] = ELeft;
-                    grow[1] = ERight;
-                }
-
-                for (int g=0; g<2; g++)
-                {
-                    Pos ga = a + KDir[grow[g]];
-                    Pos gb = b + KDir[grow[g]];
-                    if (!placement.isValid(ga) || !placement.isValid(gb))
-                        continue;
-                    if (placement[ga]==n && placement[gb]==n)
-                        loop.growth.push_back({i, {ga, gb}});
-                }
-            }
-
-            if (loop.start_free && (loop.remaining()%2 == 1 || loop.growth.empty()))
-            {
-                const Pos& a = loop.points.front();
-                for (int d = 0; d < 4; d++)
-                {
-                    Pos ga = a + KDir[d];
-                    if (!placement.isValid(ga))
-                        continue;
-                    if (placement[ga] == n)
-                        loop.growth.push_back({0, {ga}});
-                }
-            }
+         
+            add_loop_growth_points(loop);
+            loop.single_growth = test_loop_growth_trouble(loop);
 
             // pressure map
             double remaining = loop.remaining();
@@ -1301,22 +1372,38 @@ public:
         }
     }
     
+    void add_growth(Loop& loop, const Growth& growth)
+    {
+        for (const Pos& p : growth.add)
+            placement[p] = loop.id;
+        loop.points.insert(loop.points.begin() + growth.where, growth.add.begin(), growth.add.end());
+    }
+
+    bool growth_ok(const Growth& growth)
+    {
+        for (const Pos& p : growth.add)
+            if (placement[p] != n)
+                return false;
+        return true;
+    }
+
     bool grow_single_options()
     {
         bool single_found = false;
         for (Loop& loop : loops)
         {
-            if (loop.growth.size() != 1)
+            if (loop.complete())
+                continue;
+            if (loop.growth.empty())
+                throw PlacementFail(loop.id);
+            if (!loop.single_growth)
                 continue;
             single_found = true;
             const Growth& growth = loop.growth[0];
-            for (const Pos& p : growth.add)
-                if (placement[p] != n)
-                    throw PlacementFail(loop.id);
-            cout << "single grow " << loop.id << endl;
-            for (const Pos& p : growth.add)
-                placement[p] = loop.id;
-            loop.points.insert(loop.points.begin() + growth.where, growth.add.begin(), growth.add.end());
+            if (!growth_ok(growth))
+                throw PlacementFail(loop.id);
+            //cout << "single grow " << loop.id << endl;
+            add_growth(loop, growth);
         }
         return single_found;
     }
@@ -1333,7 +1420,7 @@ public:
             FOR_GRID(p, pressure)
                 pressure[p] += loop.pressure[p];
         }
-        cout << pressure;
+        //cout << pressure;
 
         // todo find highest pressure loop?
         size_t max_r = 0;
@@ -1379,7 +1466,7 @@ public:
             }
             if (lowest_pressure < 1e99)
             {
-                cout << "pressure grow " << loop.id << " " << best_growth.add[0] << endl;
+                //cout << "pressure grow " << loop.id << " " << best_growth.add[0] << endl;
                 for (const Pos& p : best_growth.add)
                     placement[p] = loop.id;
                 CheckResult check = check_growth(loop.id);
@@ -1441,10 +1528,49 @@ public:
     }
     
     void place_loop_numbers()
-    {}
+    {
+        for (Loop& loop : loops)
+        {
+            size_t i = loop.first;
+            for (const Pos& p : loop.points)
+                placement[p] = i++;
+        }
+    }
+
+    int best_score = 0;
+    vector<char> best_path;
 
     void score_and_record()
-    {}
+    {
+        Pos p(N / 2, N / 2);
+        size_t i = placement[p];
+        vector<char> path;
+        path.reserve(i);
+        while (i > 0)
+        {
+            i--;
+            bool found = false;
+            for (TDir d : {EUp, ERight, EDown, ELeft})
+            {
+                Pos q = p + KDir[d];
+                if (placement[q] == i)
+                {
+                    found = true;
+                    p = q;
+                    path.push_back("URDL"[d]);
+                }
+            }
+            if (!found)
+                report("path fail");
+        }
+
+        int score = problem.score_chars(path);
+        if (score > best_score)
+        {
+            best_score = score;
+            best_path = path;
+        }
+    }
 };
 
 vector<char> run(const Problem& p)
@@ -1502,7 +1628,7 @@ void runs(int argc, char** argv)
     Problem p;
     p.generate(i);
     SnakeCharmer prog;
-    prog.findSolution(p.N, p.V, p.snake);
+    prog.init(p.N, p.V, p.snake);
     cout << p;
     prog.find_runs(p.V+1);
     for (auto r : prog.runs)
@@ -1543,6 +1669,23 @@ void runs(int argc, char** argv)
     }
 }
 
+void eval(int argc, char** argv)
+{
+    int i = 1;
+    if (argc)
+    {
+        stringstream strm(argv[0]);
+        strm >> i;
+    }
+    Problem p;
+    p.generate(i);
+    cout << p;
+    SnakeCharmer prog;
+    vector<char> s = prog.findSolution(p.N, p.V, p.snake);
+    int score = p.score_chars(s, true);
+    cout << score << endl;
+}
+
 int main(int argc, char** argv) 
 {
     string arg="tester";
@@ -1559,6 +1702,8 @@ int main(int argc, char** argv)
         test(argc - 2, argv + 2);
     else if (arg == "runs")
         runs(argc - 2, argv + 2);
+    else if (arg == "eval")
+        eval(argc - 2, argv + 2);
 
     return 0;
 }

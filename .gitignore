@@ -10,3 +10,7 @@ SnakeCharmerVis.java
 /SnakeCharmer.vcxproj
 /SnakeCharmer.sln
 /.vs/SnakeCharmer/v16
+/Release/SnakeCharmer.tlog
+/Release
+/RelWithDeb
+/SnakeCharmer.zip
