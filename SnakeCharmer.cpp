@@ -912,6 +912,9 @@ public:
         best_score = problem.score_chars(moves);
     }
 
+    int bestV;
+    size_t bestN;
+    int bestC;
     void find_best_snake()
     {
         for (int v = maxV; v > (maxV+1)/2; v--)
@@ -933,7 +936,14 @@ public:
                     {
                         initial_placement(meeting, c, v);
                         connect_snake();
+                        size_t score = best_score;
                         score_and_record();
+                        if (score != best_score)
+                        {
+                            bestV = v;
+                            bestN = n;
+                            bestC = c;
+                        }
                     }
                     catch (PlacementFail)
                     {
@@ -1124,12 +1134,8 @@ public:
             if (!placement.isValid(p))
                 throw PlacementFail();
             size_t lower_end = meeting[meeting_idx].second;
-            size_t gap_start = lower_end + 1;
-            while (snake[gap_start] == v)
-                gap_start++;
-            size_t gap_end = loop_end - 1;
-            while (snake[gap_end] == v)
-                gap_end--;
+            size_t gap_start = non_v_after(lower_end + 1, v);
+            size_t gap_end = non_v_before(loop_end - 1, v);
             size_t low_cap = find_between(gap_start, gap_end, v, parity);
             size_t high_cap = find_between(low_cap == n ? gap_start : low_cap + 1, gap_end, v, 1 - parity);
             place_cap(high_cap, d1);
@@ -1138,7 +1144,129 @@ public:
 
         auto odd_cap_connection = [&](TDir d1, TDir d2)
         {
+            Pos cap1pos = p - KDir[d2];
+            Pos join1start = cap1pos - KDir[d2];
+            if (!placement.isValid(join1start))
+                throw PlacementFail();
+            const auto& connection = meeting[meeting_idx];
+            size_t cap1 = find_between(non_v_after(connection.second + 1, v), non_v_before(loop_end - 1, v), v, parity);
+            size_t inner_len = cap1 - connection.second;
+            size_t outer_len = loop_end - cap1;
+            if (inner_len+5 > outer_len)
+            {
+                // cap loops won't fit
+                place_connection(d1, d2);
+            }
+            else
+            {
+                size_t fold_len = inner_len / 2;
+                Loop outerloop = { loops.size(), cap1, loop_end, {cap1pos}, false };
+                Pos lp = join1start;
+                outerloop.points.push_back(lp);
+                placement[lp] = outerloop.id;
+                for (size_t i = 0; i < fold_len + 1; i++)
+                {
+                    lp -= KDir[d1];
+                    if (!placement.isValid(lp))
+                        throw PlacementFail();
+                    outerloop.points.push_back(lp);
+                    placement[lp] = outerloop.id;
+                }
+                for (size_t i = 0; i < 3; i++)
+                {
+                    lp += KDir[d2];
+                    outerloop.points.push_back(lp);
+                    placement[lp] = outerloop.id;
+                }
+                for (size_t i = 0; i < fold_len + 1; i++)
+                {
+                    lp += KDir[d1];
+                    outerloop.points.push_back(lp);
+                    placement[lp] = outerloop.id;
+                }
+                loops.push_back(outerloop);
 
+                Loop innerloop = { loops.size(), connection.second, cap1, {p}, false };
+                lp = p;
+                for (size_t i = 0; i < fold_len; i++)
+                {
+                    lp -= KDir[d1];
+                    innerloop.points.push_back(lp);
+                    placement[lp] = innerloop.id;
+                }
+                lp -= KDir[d2];
+                innerloop.points.push_back(lp);
+                placement[lp] = innerloop.id;
+                for (size_t i = 0; i < fold_len; i++)
+                {
+                    lp += KDir[d1];
+                    innerloop.points.push_back(lp);
+                    placement[lp] = innerloop.id;
+                }
+                loops.push_back(innerloop);
+
+                ignore_next_loop = true;
+                place_connection(d1, d2);
+            }
+
+            if (meeting_idx < meeting.size())
+            {
+                const auto& next_connection = meeting[meeting_idx];
+                Pos cap2pos = cap1pos + KDir[d1];
+                Pos join2start = p;
+                size_t cap2 = find_between_down(non_v_after(next_connection.second + 1, v), non_v_before(connection.first - 1, v), v, 1-parity);
+                size_t inner_len = connection.first - cap2;
+                size_t outer_len = cap2 - next_connection.second;
+                if (inner_len + 5 <= outer_len)
+                {
+                    size_t fold_len = inner_len / 2;
+                    Loop outerloop = { loops.size(), next_connection.second, cap2, {join2start}, false };
+                    Pos lp = join2start;
+                    for (size_t i = 0; i < fold_len + 1; i++)
+                    {
+                        lp += KDir[d1];
+                        if (!placement.isValid(lp))
+                            throw PlacementFail();
+                        outerloop.points.push_back(lp);
+                        placement[lp] = outerloop.id;
+                    }
+                    for (size_t i = 0; i < 3; i++)
+                    {
+                        lp -= KDir[d2];
+                        outerloop.points.push_back(lp);
+                        placement[lp] = outerloop.id;
+                    }
+                    for (size_t i = 0; i < fold_len + 1; i++)
+                    {
+                        lp -= KDir[d1];
+                        outerloop.points.push_back(lp);
+                        placement[lp] = outerloop.id;
+                    }
+                    loops.push_back(outerloop);
+
+                    Loop innerloop = { loops.size(), cap2, connection.first, {cap2pos}, false };
+                    lp = cap2pos;
+                    placement[lp] = innerloop.id;
+                    for (size_t i = 0; i < fold_len; i++)
+                    {
+                        lp += KDir[d1];
+                        innerloop.points.push_back(lp);
+                        placement[lp] = innerloop.id;
+                    }
+                    lp += KDir[d2];
+                    innerloop.points.push_back(lp);
+                    placement[lp] = innerloop.id;
+                    for (size_t i = 0; i < fold_len; i++)
+                    {
+                        lp -= KDir[d1];
+                        innerloop.points.push_back(lp);
+                        placement[lp] = innerloop.id;
+                    }
+                    loops.push_back(innerloop);
+
+                    ignore_next_loop = true;
+                }
+            }
         };
 
         if (end_caps)
@@ -1216,9 +1344,33 @@ public:
         loops.push_back(loop);
     }
 
+    size_t non_v_after(size_t i, size_t v)
+    {
+        while (snake[i] == v)
+            i++;
+        return i;
+    }
+
+    size_t non_v_before(size_t i, size_t v)
+    {
+        while (snake[i] == v)
+            i--;
+        return i;
+    }
+
     size_t find_between(size_t from, size_t to, int v, size_t parity)
     {
         for (size_t i = from; i <= to; i++)
+        {
+            if ((i % 2) == parity && snake[i] == v)
+                return i;
+        }
+        return n;
+    }
+
+    size_t find_between_down(size_t from, size_t to, int v, size_t parity)
+    {
+        for (size_t i = to; n > i && i >= from; i--)
         {
             if ((i % 2) == parity && snake[i] == v)
                 return i;
@@ -1309,10 +1461,13 @@ public:
         bool trouble = false;
         while (!trouble && loop.remaining() > 2)
         {
+            size_t next_allowed = 0;
             for (const Growth& growth : loop.growth)
             {
                 if (loop.remaining() <= 2)
                     break;
+                if (growth.where < next_allowed)
+                    continue;
                 if (growth_ok(growth))
                 {
                     add_growth(loop, growth);
@@ -1324,6 +1479,7 @@ public:
                             continue;
                         later.where += growth.add.size();
                     }
+                    next_allowed = growth.where + 1;
                 }
             }
             loop.growth.clear();
@@ -1643,52 +1799,69 @@ void test(int argc, char** argv)
 void runs(int argc, char** argv)
 {
     int i = 1;
-    if (argc)
+    if (argc >= 1)
     {
         stringstream strm(argv[0]);
         strm >> i;
     }
     Problem p;
     p.generate(i);
+
+    int v = p.V + 1;
+    int n = p.N - 1;
+    int c = 4;
+    if (argc >= 2)
+    {
+        stringstream strm(argv[1]);
+        strm >> v;
+    }
+    if (argc >= 3)
+    {
+        stringstream strm(argv[2]);
+        strm >> n;
+    }
+    if (argc >= 4)
+    {
+        stringstream strm(argv[3]);
+        strm >> c;
+    }
+
     SnakeCharmer prog;
     prog.init(p.N, p.V, p.snake);
     cout << p;
-    prog.find_runs(p.V+1);
+    prog.find_runs(v);
     for (auto r : prog.runs)
         if (r.length > 1) cout << r.start << " " << r.length << endl;
-    auto m = prog.best_meeting(p.N - 1);
+    auto m = prog.best_meeting(n);
     cout << m.size() << endl;
     for (auto p : m)
         cout << p.first << " " << p.second << endl;
-    for (int c = 3; c >= 0; c--)
+    try
     {
-        try
-        {
-            prog.initial_placement(m, c, p.V + 1);
-            prog.connect_snake();
-            cout << "success" << endl;
-        }
-        catch (PlacementFail f)
-        {
-            cout << "fail " << f.id << endl;
-        }
-        Grid<char> dg(p.N, p.N, ' ');
-        string ids = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        FOR_GRID(q, dg)
-        {
-            size_t x = prog.placement[q];
-            if (x == p.N * p.N) continue;
-            if (x < 50) dg[q] = ids[x];
-            else dg[q] = '#';
-        }
-        cout << dg;
-        for (auto loop : prog.loops)
-        {
-            cout << ids[loop.id] << loop.id << " "  << loop.first << " " << loop.last << " " << (loop.complete() ? "Y" : "n") << " " << loop.start_free;
-            for (Pos p : loop.points)
-                cout << " " << p;
-            cout << endl;
-        }
+        prog.initial_placement(m, c, v);
+        prog.connect_snake();
+        cout << "success" << endl;
+    }
+    catch (PlacementFail f)
+    {
+        cout << "fail " << f.id << endl;
+    }
+    Grid<char> dg(p.N, p.N, ' ');
+    string ids = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    FOR_GRID(q, dg)
+    {
+        size_t x = prog.placement[q];
+        if (x == p.N * p.N) continue;
+        if (x < 50) dg[q] = ids[x];
+        else dg[q] = '#';
+    }
+    cout << dg;
+    for (auto loop : prog.loops)
+    {
+        cout << ids[loop.id] << loop.id << " "  << loop.first << " " << loop.last << " " << (loop.complete() ? "Y" : "n") << " " << loop.start_free;
+        for (Pos p : loop.points)
+            cout << " " << p;
+        cout << endl;
     }
 }
 
@@ -1706,6 +1879,7 @@ void eval(int argc, char** argv)
     SnakeCharmer prog;
     vector<char> s = prog.findSolution(p.N, p.V, p.snake);
     int score = p.score_chars(s, true);
+    cout << "bestV=" << prog.bestV << " bestN=" << prog.bestN << " bestC=" << prog.bestC << endl;
     cout << score << endl;
 }
 
