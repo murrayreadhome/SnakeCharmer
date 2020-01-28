@@ -924,7 +924,7 @@ public:
             {
                 if (milliseconds() > TIME_LIMIT)
                     break;
-                vector<pair<size_t, size_t>> meeting = best_meeting(n);
+                vector<pair<size_t, size_t>> meeting = best_meeting(n, v);
                 if (meeting.size() < n)
                     n = meeting.size();
                 if (n == 0)
@@ -989,10 +989,44 @@ public:
             record_run(n);
     }
 
-    vector<pair<size_t, size_t>> best_meeting(size_t n)
+    size_t score_runs(const vector<Run>& runs, size_t v)
+    {
+        size_t total = 0;
+        for (size_t i=0; i<runs.size(); i++)
+        {
+            Run a{0,0};
+            if (i>0)
+                a=runs[i-1];
+            Run b=runs[i];
+            Run c{0,0};
+            if (i < runs.size()-1)
+                c=runs[i+1];
+
+            size_t parity = i%2;
+
+            size_t a_offset = (a.start%2 != parity) ? 0 : 1;
+            size_t b_offset = (b.start%2 == parity) ? 0 : 1;
+            size_t c_offset = (c.start%2 != parity) ? 0 : 1;
+
+            for (size_t j=0; j<b.length; j++)
+            {
+                size_t cell = v;
+                if (j>0) cell *= v;
+                if (j<b.length-1) cell *= v;
+                size_t a_rel = j + a.length/2 + a_offset - b.length/2 - b_offset;
+                if (0 <= a_rel && a_rel < a.length) cell *= v;
+                size_t c_rel = j + c.length/2 + c_offset - b.length/2 - b_offset;
+                if (0 <= c_rel && a_rel < c.length) cell *= v;
+                total += cell;
+            }
+        }
+        return total;
+    }
+
+    vector<pair<size_t, size_t>> best_meeting(size_t n, int v)
     {
         vector<pair<size_t, size_t>> best;
-        size_t best_size = 0;
+        size_t best_score = 0;
         for (size_t parity = 0; parity < 2; parity++)
         {
             vector<Run> valid_runs;
@@ -1028,12 +1062,14 @@ public:
             }
 
             // todo improve scoring, size probably matters, but isn't everything
-            size_t runs_size = 0;
-            for (const Run& run : valid_runs)
-                runs_size += run.length;
-            if (runs_size > best_size)
+//            size_t runs_size = 0;
+//            for (const Run& run : valid_runs)
+//                runs_size += run.length;
+
+            size_t runs_score = score_runs(valid_runs, v);
+            if (runs_score > best_score)
             {
-                best_size = runs_size;
+                best_score = runs_score;
                 best.clear();
                 for (const Run& run : valid_runs)
                     best.push_back({ run.start, run.start + 1 });
@@ -1832,7 +1868,7 @@ void runs(int argc, char** argv)
     prog.find_runs(v);
     for (auto r : prog.runs)
         if (r.length > 1) cout << r.start << " " << r.length << endl;
-    auto m = prog.best_meeting(n);
+    auto m = prog.best_meeting(n, v);
     cout << m.size() << endl;
     for (auto p : m)
         cout << p.first << " " << p.second << endl;
@@ -1901,6 +1937,8 @@ int main(int argc, char** argv)
         runs(argc - 2, argv + 2);
     else if (arg == "eval")
         eval(argc - 2, argv + 2);
+    else
+        cout << "what?" << endl;
 
     return 0;
 }
