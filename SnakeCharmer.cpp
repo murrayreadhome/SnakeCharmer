@@ -803,10 +803,10 @@ struct Problem
             snake[i] = '0' + uniform_int_distribution<int>(2,V+1)(re);
     }
 
+    mutable Grid<int> g;
     int score_chars(const vector<char>& path, bool print_grid = false) const
     {
         Pos p(N / 2, N / 2);
-        static Grid<int> g;
         g.init(N, N, 0, 1);
         size_t i = path.size();
         g[p] = snake[i--]-'0';
@@ -929,12 +929,13 @@ public:
                     n = meeting.size();
                 if (n == 0)
                     break;
-                for (int c = 4; c >= 0; c--)
+                for (int c = 7; c >= 0; c--)
                 {
                     // cout << v << " " << n << " " << c << endl;
                     try
                     {
                         initial_placement(meeting, c, v);
+                        //cout << "a" << endl;
                         connect_snake();
                         size_t score = best_score;
                         score_and_record();
@@ -1062,11 +1063,11 @@ public:
             }
 
             // todo improve scoring, size probably matters, but isn't everything
-//            size_t runs_size = 0;
-//            for (const Run& run : valid_runs)
-//                runs_size += run.length;
+            size_t runs_score = 0;
+            for (const Run& run : valid_runs)
+                runs_score += run.length;
 
-            size_t runs_score = score_runs(valid_runs, v);
+//            size_t runs_score = score_runs(valid_runs, v);
             if (runs_score > best_score)
             {
                 best_score = runs_score;
@@ -1113,11 +1114,16 @@ public:
         placement.init(N, N, n, 1);
         loops.clear();
 
+        int left_size_adjust = 0;
+        if (cap_options == 7)
+        {
+            left_size_adjust = -1;
+            cap_options = 6;
+        }
         bool end_caps = cap_options & 1;
         bool mid_caps = cap_options & 2;
         bool odd_caps = cap_options & 4;
-        if (odd_caps)
-            end_caps = mid_caps = true;
+
         size_t parity = meeting.front().first % 2;
         size_t m = meeting.size();
         size_t m2 = m / 2;
@@ -1337,31 +1343,38 @@ public:
             if (m < 3)
                 throw PlacementFail();
 
-            size_t m4 = m2 / 2;
+            size_t left_size = 1;
+            while (meeting.back().second / 2 < meeting[m - 1 - left_size].second)
+                left_size++;
+            left_size += left_size_adjust;
+            size_t right_size = m - left_size;
+
+            size_t m4 = left_size / 2;
             for (size_t i = 0; i < m4; i++)
                 place_connection(ELeft, ELeft);
 
-            if (mid_caps && m % 2 == 0)
+            if (mid_caps && left_size % 2 == 0)
                 add_mid_caps(EUp, ERight);
-            else
+            else if (left_size % 2 == 1)
             {
                 if (odd_caps)
-                    odd_cap_connection(ERight, EUp);
+                    odd_cap_connection(EUp, ERight);
                 else
                     place_connection(EUp, ERight);
             }
+            else
+                p = p + KDir[EUp] + KDir[ERight];
 
             for (size_t i = 0; i < m4; i++)
                 place_connection(ERight, ERight);
 
-            size_t mr = meeting_idx + 1;
-            m4 = mr / 2;
+            m4 = right_size / 2;
             for (size_t i = 0; i < m4; i++)
                 place_connection(ERight, ERight);
 
-            if (mid_caps)
+            if (mid_caps && right_size % 2 == 0)
                 add_mid_caps(EDown, ELeft);
-            else if (m % 2 == 0)
+            else if (right_size % 2 == 1)
             {
                 if (odd_caps)
                     odd_cap_connection(EDown, ELeft);
@@ -1382,15 +1395,17 @@ public:
 
     size_t non_v_after(size_t i, size_t v)
     {
-        while (snake[i] == v)
+        while (i<n && snake[i] == v)
             i++;
         return i;
     }
 
     size_t non_v_before(size_t i, size_t v)
     {
-        while (snake[i] == v)
+        while (i<n && snake[i] == v)
             i--;
+        if (i > n)
+            i = n;
         return i;
     }
 
@@ -1919,6 +1934,57 @@ void eval(int argc, char** argv)
     cout << score << endl;
 }
 
+/*
+86712
+80514
+186468
+223934
+108964
+3332
+44626
+287642
+32480
+65833
+117795
+67056
+68043
+322146
+73165
+121040
+26421
+872
+44360
+129930
+*/
+
+void score(int argc, char** argv)
+{
+    int i = 1, j=1;
+    if (argc)
+    {
+        stringstream strm(argv[0]);
+        strm >> i;
+        j = i;
+    }
+    if (argc>1)
+    {
+        stringstream strm(argv[1]);
+        strm >> j;
+        if (i > j)
+            swap(i, j);
+    }
+    for (; i <= j; i++)
+    {
+        Problem p;
+        p.generate(i);
+        SnakeCharmer prog;
+        milliseconds(true);
+        vector<char> s = prog.findSolution(p.N, p.V, p.snake);
+        int score = p.score_chars(s, false);
+        cout << score << endl;
+    }
+}
+
 int main(int argc, char** argv) 
 {
     string arg="tester";
@@ -1937,6 +2003,8 @@ int main(int argc, char** argv)
         runs(argc - 2, argv + 2);
     else if (arg == "eval")
         eval(argc - 2, argv + 2);
+    else if (arg == "score")
+        score(argc - 2, argv + 2);
     else
         cout << "what?" << endl;
 
