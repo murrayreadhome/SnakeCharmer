@@ -37,19 +37,15 @@ using namespace std;
 
 #ifdef TESTING_AT_HOME
 #include <time.h>
-int getTime()
-{
-    return (int)clock();
-}
 int milliseconds(bool reset = false)
 {
     static clock_t start = clock();
     if (reset)
         start = clock();
     clock_t now = clock();
-    int elapsed = now - start;
+    clock_t elapsed = now - start;
     elapsed = (elapsed * 1000) / (CLOCKS_PER_SEC);
-    return elapsed;
+    return int(elapsed);
 }
 #else
 #include <sys/time.h>
@@ -919,16 +915,21 @@ public:
     {
         for (int v = maxV; v > (maxV+1)/2; v--)
         {
+            size_t last_start = n;
             find_runs(v);
             for (size_t n = N - 1; n > 0; n--)
             {
-                if (milliseconds() > TIME_LIMIT)
+                auto ms = milliseconds();
+                //cout << ms << endl;
+                if (ms > TIME_LIMIT)
                     break;
-                vector<pair<size_t, size_t>> meeting = best_meeting(n, v);
+                vector<pair<size_t, size_t>> meeting = best_meeting(n, v, last_start);
                 if (meeting.size() < n)
                     n = meeting.size();
                 if (n == 0)
                     break;
+                if (n < N-1)
+                    last_start = non_v_before(meeting.back().first, v);
                 for (int c = 7; c >= 0; c--)
                 {
                     // cout << v << " " << n << " " << c << endl;
@@ -1024,7 +1025,7 @@ public:
         return total;
     }
 
-    vector<pair<size_t, size_t>> best_meeting(size_t n, int v)
+    vector<pair<size_t, size_t>> best_meeting(size_t n, int v, size_t max_start)
     {
         vector<pair<size_t, size_t>> best;
         size_t best_score = 0;
@@ -1033,6 +1034,8 @@ public:
             vector<Run> valid_runs;
             for (const Run& run : runs)
             {
+                if (run.start >= max_start)
+                    break;
                 if (run.length == 2)
                 {
                     if ((run.start % 2) == parity)
@@ -1049,7 +1052,7 @@ public:
             }
 
             while (valid_runs.size() > n)
-            {
+            {                
                 // todo could attempt to bring large runs together
                 // removing from the end, to free up more space, but does that really help? or just cost a little bit?
                 auto smallest = min_element(valid_runs.rbegin(), valid_runs.rend(), [](const Run& a, const Run& b)
@@ -1883,7 +1886,7 @@ void runs(int argc, char** argv)
     prog.find_runs(v);
     for (auto r : prog.runs)
         if (r.length > 1) cout << r.start << " " << r.length << endl;
-    auto m = prog.best_meeting(n, v);
+    auto m = prog.best_meeting(n, v, p.N*p.N);
     cout << m.size() << endl;
     for (auto p : m)
         cout << p.first << " " << p.second << endl;
