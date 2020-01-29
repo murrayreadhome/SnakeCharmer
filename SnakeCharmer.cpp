@@ -917,6 +917,7 @@ public:
         {
             size_t last_start = n;
             find_runs(v);
+            int reductions = 0;
             for (size_t n = N - 1; n > 0; n--)
             {
                 auto ms = milliseconds();
@@ -928,7 +929,8 @@ public:
                     n = meeting.size();
                 if (n == 0)
                     break;
-                if (n < N-1)
+                reductions++;
+                if (reductions > 3)
                     last_start = non_v_before(meeting.back().first, v);
                 for (int c = 7; c >= 0; c--)
                 {
@@ -1599,7 +1601,7 @@ public:
                     }
                 }
                 now.swap(next);
-                remaining -= double(now.size()) * 0.7;
+                remaining -= double(now.size()) * 0.1;
                 pf *= 0.9;
             }
         }
@@ -1938,26 +1940,26 @@ void eval(int argc, char** argv)
 }
 
 /*
-86712
-80514
-186468
-223934
-108964
-3332
-44626
-287642
-32480
+83834
+90383
+215430
+227813
+109708
+3680
+44048
+298948
+34142
 65833
-117795
+119361
 67056
-68043
-322146
-73165
-121040
-26421
-872
+66426
+336035
+76565
+111237
+28279
+866
 44360
-129930
+155388
 */
 
 void score(int argc, char** argv)
